@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Form, HTTPException, Path, Query, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 import mercadopago as mp
@@ -27,10 +27,21 @@ templates = obter_jinja_templates("templates/cliente")
 
 
 @router.get("/pedidos")
-async def get_pedidos(request: Request):
+async def get_pedidos(request: Request, periodo: str = Query("todos")):
+    data_inicial = datetime(1900, 1, 1)
+    data_final = datetime.now()
+    match periodo:
+        case "30":
+            data_inicial = data_final - timedelta (days=30)
+        case "60":
+            data_inicial = data_final - timedelta (days=60)
+        case "90":
+            data_inicial = data_final - timedelta (days=90)
+
+    pedidos = PedidoRepo.obter_por_periodo(request.state.cliente.id, data_inicial, data_final)
     return templates.TemplateResponse(
         "pages/pedidos.html",
-        {"request": request},
+        {"request": request, "pedidos": pedidos},
     )
 
 
@@ -100,9 +111,17 @@ async def get_carrinho(request: Request):
     pedido_carrinho = pedidos[0] if pedidos else None
     if pedido_carrinho:
         itens_pedido = ItemPedidoRepo.obter_por_pedido(pedido_carrinho.id)
+    if not pedido_carrinho or not itens_pedido:
+        response = RedirectResponse("/", status.HTTP_303_SEE_OTHER)
+        adicionar_mensagem_alerta(
+            response,
+            "Seu carrinho esta vazio. Adicione produtos para continuar."
+        )
+        return response
+    
     return templates.TemplateResponse(
         "pages/carrinho.html",
-        {"request": request, "itens": itens_pedido},
+        {"request": request, "itens": itens_pedido,"valor_total": pedido_carrinho.valor_total},
     )
 
 
@@ -177,14 +196,14 @@ async def get_pagamento(request: Request, id_pedido: int = Path(...)):
         #     "email": request.state.usuario.email,
         # },
         "payer": {
-            "name": "Test",
-            "surname": "Test",
-            "email": "test_user_1218031040@testuser.com",
+            "name": "Test Test",
+            "surname": "Test Test",
+            "email": "test_user_975173918@testuser.com",
         },
         "back_urls": {
-            "success": f"{url_de_retorno_do_mp}/pedido/mp/sucesso/{pedido.id}",
-            "failure": f"{url_de_retorno_do_mp}/pedido/mp/falha/{pedido.id}",
-            "pending": f"{url_de_retorno_do_mp}/pedido/mp/pedente/{pedido.id}",
+            "success": f"{url_de_retorno_do_mp}/cliente/mp/sucesso/{pedido.id}",
+            "failure": f"{url_de_retorno_do_mp}/cliente/mp/falha/{pedido.id}",
+            "pending": f"{url_de_retorno_do_mp}/cliente/mp/pendente/{pedido.id}",
         },
         "auto_return": "approved",
     }
@@ -213,7 +232,7 @@ async def get_mp_falha(
     request: Request,
     id_pedido: int = Path(...),
 ):
-    response = RedirectResponse(f"/pedido/resumo?id_pedido={id_pedido}")
+    response = RedirectResponse(f"/cliente/resumopedido?id_pedido={id_pedido}")
     adicionar_mensagem_erro(
         response,
         "Houve alguma falha ao processar seu pagamento. Por favor, tente novamente.",
@@ -228,7 +247,7 @@ async def get_mp_pendente(
 ):
     pedido = PedidoRepo.obter_por_id(id_pedido)
     PedidoRepo.alterar_estado(id_pedido, EstadoPedido.PAGO.value)
-    return RedirectResponse(f"/pedido/detalhes/{id_pedido}")
+    return RedirectResponse(f"/pages/detalhespedido/{id_pedido}")
 
 
 @router.post("/post_adicionar_carrinho", response_class=RedirectResponse)
@@ -258,6 +277,7 @@ async def post_adicionar_carrinho(request: Request, id_produto: int = Form(...))
     else:
         ItemPedidoRepo.aumentar_quantidade_produto(pedido_carrinho.id, id_produto)
         mensagem = f"O produto <b>{produto.nome}</b> já estava no carrinho e teve sua quantidade aumentada."
+    PedidoRepo.atualizar_valor_total(pedido_carrinho.id)
     response = RedirectResponse("/cliente/carrinho", status.HTTP_303_SEE_OTHER)
     adicionar_mensagem_sucesso(response, mensagem)
     return response
@@ -293,6 +313,7 @@ async def post_aumentar_item(request: Request, id_produto: int = Form(0)):
         response,
         f"O produto <b>{produto.nome}</b> teve sua quantidade aumentada para <b>{qtde+1}</b>.",
     )
+    PedidoRepo.atualizar_valor_total(pedido_carrinho.id)
     return response
 
 
@@ -322,10 +343,39 @@ async def post_reduzir_item(request: Request, id_produto: int = Form(0)):
     ItemPedidoRepo.diminuir_quantidade_produto(pedido_carrinho.id, id_produto)
     adicionar_mensagem_sucesso(
         response,
-        f"O produto <b>{produto.nome}</b> teve sua quantidade diminuída para <b>{qtde+1}</b>.",
+        f"O produto <b>{produto.nome}</b> teve sua quantidade diminuída para <b>{qtde-1}</b>.",
     )
+    PedidoRepo.atualizar_valor_total(pedido_carrinho.id)
     return response
 
+@router.post("/post_remover_item", response_class=RedirectResponse)
+async def post_remover_item(request: Request, id_produto: int = Form(0)):
+    if not id_produto:
+        return RedirectResponse("/cliente/carrinho", status.HTTP_304_NOT_MODIFIED)
+    produto = ProdutoRepo.obter_um(id_produto)
+    if not produto:
+        response = RedirectResponse("/cliente/carrinho", status.HTTP_304_NOT_MODIFIED)
+        adicionar_mensagem_alerta(response, "Produto não encontrado.")
+        return response
+    pedidos = PedidoRepo.obter_por_estado(
+        request.state.cliente.id, EstadoPedido.CARRINHO.value
+    )
+    pedido_carrinho = pedidos[0] if pedidos else None
+    response = RedirectResponse("/cliente/carrinho", status.HTTP_303_SEE_OTHER)
+    if pedido_carrinho == None:
+        adicionar_mensagem_alerta(f"Seu carrinho não foi encontrado.")
+        return response
+    qtde = ItemPedidoRepo.obter_quantidade_por_produto(pedido_carrinho.id, id_produto)
+    if qtde == 0:
+        adicionar_mensagem_alerta(
+            f"O produto {id_produto} não foi encontrado em seu carrinho."
+        )
+        return response
+    ItemPedidoRepo.excluir(pedido_carrinho.id, id_produto)
+    response = RedirectResponse("/cliente/carrinho", status.HTTP_303_SEE_OTHER)
+    adicionar_mensagem_sucesso(response, "Item excluído com sucesso.")
+    PedidoRepo.atualizar_valor_total(pedido_carrinho.id)
+    return response
 
 @router.get("/pedidoconfirmado/{id_pedido:int}", response_class=HTMLResponse)
 async def get_pedidoconfirmado(
@@ -337,7 +387,7 @@ async def get_pedidoconfirmado(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     PedidoRepo.alterar_estado(id_pedido, EstadoPedido.PAGO.value)
     return templates.TemplateResponse(
-        "pedido/pedidoconfirmado.html",
+        "pages/pedidoconfirmado.html",
         {"request": request, "pedido": pedido},
     )
 
@@ -357,6 +407,6 @@ async def get_detalhespedido(
     itens = ItemPedidoRepo.obter_por_pedido(pedido.id)
     pedido.itens = itens
     return templates.TemplateResponse(
-        "pedido/detalhes.html",
+        "pages/detalhespedido.html",
         {"request": request, "pedido": pedido},
     )
