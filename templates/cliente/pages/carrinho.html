@@ -27,7 +27,7 @@
                 </a>
             </td>
             <td><a href="/produto/{{i.id_produto}}">{{ i.nome_produto }}</a></td>
-            <td>{{"{:,.2f}".format(i.valor_produto)}}</td>
+            <td>{{ "{:,.2f}".format(i.valor_produto) }}</td>
             <td>
                 <form action="/cliente/post_reduzir_item" method="post" class="d-inline-block">
                     <input type="hidden" name="id_produto" value="{{i.id_produto}}">
@@ -43,7 +43,7 @@
                     </button>
                 </form>
             </td>
-            <td>{{"{:,.2f}".format(i.valor_item)}}</td>
+            <td>{{ "{:,.2f}".format(i.valor_item) }}</td>
             <td>
                 <form action="/cliente/post_remover_item" method="post" class="d-inline-block">
                     <input type="hidden" name="id_produto" value="{{i.id_produto}}">

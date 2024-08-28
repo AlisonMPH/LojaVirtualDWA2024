@@ -90,15 +90,15 @@ class PedidoRepo:
         except sqlite3.Error as ex:
             print(ex)
             return False
-
+        
     @classmethod
     def atualizar_valor_total(
         cls, id: int, valor_total: float = 0
     ) -> bool:
         if not valor_total:
             itens = ItemPedidoRepo.obter_por_pedido(id)
-        if itens:
-            valor_total = sum([item.valor_item for item in itens])
+            if itens:
+                valor_total = sum([item.valor_item for item in itens])
         try:
             with obter_conexao() as conexao:
                 cursor = conexao.cursor()

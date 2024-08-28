@@ -56,7 +56,7 @@ SQL_OBTER_QUANTIDADE = """
 """
 
 SQL_OBTER_POR_PERIODO = """
-    SELECT id, data_formatada, valor_total, endereco_entrega, estado, id_cliente
+    SELECT id, data_hora, valor_total, endereco_entrega, estado, id_cliente
     FROM pedido
     WHERE (id_cliente = ?) AND (data_hora BETWEEN ? AND ?)
     ORDER BY data_hora DESC

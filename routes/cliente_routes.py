@@ -32,12 +32,11 @@ async def get_pedidos(request: Request, periodo: str = Query("todos")):
     data_final = datetime.now()
     match periodo:
         case "30":
-            data_inicial = data_final - timedelta (days=30)
+            data_inicial = data_final - timedelta(days=30)
         case "60":
-            data_inicial = data_final - timedelta (days=60)
+            data_inicial = data_final - timedelta(days=60)
         case "90":
-            data_inicial = data_final - timedelta (days=90)
-
+            data_inicial = data_final - timedelta(days=90)
     pedidos = PedidoRepo.obter_por_periodo(request.state.cliente.id, data_inicial, data_final)
     return templates.TemplateResponse(
         "pages/pedidos.html",
@@ -115,13 +114,13 @@ async def get_carrinho(request: Request):
         response = RedirectResponse("/", status.HTTP_303_SEE_OTHER)
         adicionar_mensagem_alerta(
             response,
-            "Seu carrinho esta vazio. Adicione produtos para continuar."
+            "Seu carrinho está vazio. Adicione produtos para continuar."
         )
         return response
-    
+    total_pedido = sum([item.valor_item for item in itens_pedido])
     return templates.TemplateResponse(
         "pages/carrinho.html",
-        {"request": request, "itens": itens_pedido,"valor_total": pedido_carrinho.valor_total},
+        {"request": request, "itens": itens_pedido, "valor_total": total_pedido},
     )
 
 
@@ -172,6 +171,8 @@ async def get_pagamento(request: Request, id_pedido: int = Path(...)):
             response, "O pedido em questão não está apto a receber pagamento."
         )
         return response
+    # muda o estado do pedido para PENDENTE
+    PedidoRepo.alterar_estado(id_pedido, EstadoPedido.PENDENTE.value)
     # captura os itens do pedido
     itens = ItemPedidoRepo.obter_por_pedido(pedido.id)
     total_pedido = sum([item.valor_item for item in itens])
@@ -196,9 +197,9 @@ async def get_pagamento(request: Request, id_pedido: int = Path(...)):
         #     "email": request.state.usuario.email,
         # },
         "payer": {
-            "name": "Test Test",
-            "surname": "Test Test",
-            "email": "test_user_975173918@testuser.com",
+            "name": "Test",
+            "surname": "Test",
+            "email": "test_user_1218031040@testuser.com",
         },
         "back_urls": {
             "success": f"{url_de_retorno_do_mp}/cliente/mp/sucesso/{pedido.id}",
@@ -232,10 +233,10 @@ async def get_mp_falha(
     request: Request,
     id_pedido: int = Path(...),
 ):
-    response = RedirectResponse(f"/cliente/resumopedido?id_pedido={id_pedido}")
+    response = RedirectResponse(f"/cliente/detalhespedido/{id_pedido}")
     adicionar_mensagem_erro(
         response,
-        "Houve alguma falha ao processar seu pagamento. Por favor, tente novamente.",
+        "Seu pagamento ainda não foi processado. Você pode tentar realizar o pagamento novamente clicando no botão <b>Pagar com Mercado Pago</b>.",
     )
     return response
 
@@ -247,7 +248,7 @@ async def get_mp_pendente(
 ):
     pedido = PedidoRepo.obter_por_id(id_pedido)
     PedidoRepo.alterar_estado(id_pedido, EstadoPedido.PAGO.value)
-    return RedirectResponse(f"/pages/detalhespedido/{id_pedido}")
+    return RedirectResponse(f"/cliente/detalhespedido/{id_pedido}")
 
 
 @router.post("/post_adicionar_carrinho", response_class=RedirectResponse)
@@ -377,6 +378,8 @@ async def post_remover_item(request: Request, id_produto: int = Form(0)):
     PedidoRepo.atualizar_valor_total(pedido_carrinho.id)
     return response
 
+
+
 @router.get("/pedidoconfirmado/{id_pedido:int}", response_class=HTMLResponse)
 async def get_pedidoconfirmado(
     request: Request,
@@ -398,7 +401,7 @@ async def get_detalhespedido(
     id_pedido: int = Path(...),
 ):
     pedido = PedidoRepo.obter_por_id(id_pedido)
-    if pedido.id_usuario != request.state.usuario.id:
+    if pedido.id_cliente != request.state.cliente.id:
         response = RedirectResponse(url="/pedidos", status_code=status.HTTP_302_FOUND)
         return adicionar_mensagem_erro(
             response,
@@ -410,3 +413,17 @@ async def get_detalhespedido(
         "pages/detalhespedido.html",
         {"request": request, "pedido": pedido},
     )
+
+@router.post("/post_cancelar_pedido", response_class=RedirectResponse)
+async def post_cancelar_pedido(request: Request, id_pedido: int = Form(0)):
+    pedido = PedidoRepo.obter_por_id(id_pedido)
+    if not pedido or pedido.id_cliente != request.state.cliente.id:
+        response = RedirectResponse(url="/cliente/pedidos", status_code=status.HTTP_302_FOUND)
+        return adicionar_mensagem_erro(
+            response,
+            "Pedido não encontrado. Verifique o número do pedido e tente novamente.",
+        )
+    PedidoRepo.alterar_estado(id_pedido, EstadoPedido.CANCELADO.value)
+    response = RedirectResponse(url="/cliente/pedidos", status_code=status.HTTP_303_SEE_OTHER)
+    adicionar_mensagem_sucesso(response, "Pedido cancelado com sucesso.")
+    return response
