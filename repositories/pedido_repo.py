@@ -214,10 +214,7 @@ class PedidoRepo:
             with obter_conexao() as conexao:
                 cursor = conexao.cursor()
                 tuplas = cursor.execute(
-                    SQL_OBTER_TODOS_POR_ESTADO,
-                    (
-                        estado,
-                    ),
+                    SQL_OBTER_TODOS_POR_ESTADO, (estado,),
                 ).fetchall()
                 pedidos = [Pedido(*t) for t in tuplas]
                 return pedidos
